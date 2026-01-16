@@ -48,8 +48,11 @@ from exo.shared.types.memory import Memory
 from exo.shared.types.tasks import ChatCompletionTaskParams
 from exo.shared.types.worker.instances import (
     BoundInstance,
+    CudaGlooInstance,
+    CudaNcclInstance,
     MlxJacclInstance,
     MlxRingInstance,
+    VulkanComputeInstance,
 )
 from exo.shared.types.worker.shards import (
     PipelineShardMetadata,
@@ -205,6 +208,15 @@ def mlx_distributed_init(
                 os.environ["MLX_RANK"] = str(rank)
                 os.environ["MLX_JACCL_COORDINATOR"] = jaccl_coordinator
                 group = mx.distributed.init(backend="jaccl", strict=True)
+
+            case CudaNcclInstance() | CudaGlooInstance() | VulkanComputeInstance():
+                # Non-MLX instances should not use this function
+                # They should use their respective engine's initialization
+                raise TypeError(
+                    f"mlx_distributed_init cannot initialize non-MLX instances. "
+                    f"Got {type(bound_instance.instance).__name__}. "
+                    f"Use the appropriate engine for CUDA or Vulkan instances."
+                )
 
         logger.info(f"Rank {rank} mlx distributed initialization complete")
 

@@ -166,6 +166,27 @@ def place_instance(
                 ephemeral_port=ephemeral_port,
             )
 
+        case InstanceMeta.CudaNccl:
+            # TODO: Implement CUDA NCCL instance placement (Phase 3)
+            raise NotImplementedError(
+                "CUDA NCCL instance placement is not yet implemented. "
+                "This will be added in Phase 3: CUDA Backend Implementation."
+            )
+
+        case InstanceMeta.CudaGloo:
+            # TODO: Implement CUDA Gloo instance placement (Phase 3)
+            raise NotImplementedError(
+                "CUDA Gloo instance placement is not yet implemented. "
+                "This will be added in Phase 3: CUDA Backend Implementation."
+            )
+
+        case InstanceMeta.VulkanCompute:
+            # TODO: Implement Vulkan compute instance placement (Phase 8)
+            raise NotImplementedError(
+                "Vulkan compute instance placement is not yet implemented. "
+                "This will be added in Phase 8: Vulkan Backend."
+            )
+
     return target_instances
 
 
