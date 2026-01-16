@@ -1,3 +1,23 @@
+"""
+MLX inference engine for Apple Silicon.
+
+This package provides the MLX backend for distributed inference on Apple Silicon
+devices. It supports both Ring (TCP/Ethernet) and JACCL (RDMA/Thunderbolt 5)
+communication backends for multi-device inference.
+
+Key components:
+    - MlxEngine: The main engine class implementing InferenceEngine protocol
+    - Model: Type stub for MLX model interface
+    - TokenizerWrapper: Type stub for tokenizer interface
+
+Usage:
+    from exo.worker.engines.mlx import MlxEngine, get_mlx_engine
+
+    engine = get_mlx_engine()
+    # or
+    engine = MlxEngine()
+"""
+
 from typing import Any
 
 import mlx.core as mx
@@ -41,3 +61,24 @@ class TokenizerWrapper:
         tokenize: bool = False,
         add_generation_prompt: bool = True,
     ) -> str: ...
+
+
+# Engine exports
+from exo.worker.engines.mlx.engine import (
+    MlxDistributedGroupWrapper,
+    MlxEngine,
+    get_mlx_engine,
+    mlx_engine,
+)
+
+__all__ = [
+    # Type stubs
+    "Model",
+    "Detokenizer",
+    "TokenizerWrapper",
+    # Engine
+    "MlxEngine",
+    "MlxDistributedGroupWrapper",
+    "get_mlx_engine",
+    "mlx_engine",
+]
