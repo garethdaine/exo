@@ -39,6 +39,15 @@ from exo.worker.engines.registry import (
     register_engine,
     register_engine_factory,
 )
+from exo.worker.engines.serialization import (
+    FrameworkType,
+    SerializedTensor,
+    TensorDtype,
+    TensorMetadata,
+    TensorSerializer,
+    TensorSerializerProtocol,
+    tensor_serializer,
+)
 
 __all__ = [
     # Base protocols and types
@@ -59,4 +68,12 @@ __all__ = [
     "list_available_engines",
     "register_engine",
     "register_engine_factory",
+    # Serialization
+    "FrameworkType",
+    "SerializedTensor",
+    "TensorDtype",
+    "TensorMetadata",
+    "TensorSerializer",
+    "TensorSerializerProtocol",
+    "tensor_serializer",
 ]
