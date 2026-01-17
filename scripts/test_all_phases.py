@@ -253,9 +253,9 @@ def test_phase3_cuda_engine() -> bool:
 
     print_subheader("3.2 CUDA Engine")
     try:
-        from exo.worker.engines.cuda import CudaEngine
+        from exo.worker.engines.cuda import get_cuda_engine
 
-        engine = CudaEngine()
+        engine = get_cuda_engine()
         print_result("CudaEngine instantiation", True)
 
         # Verify it implements InferenceEngine
