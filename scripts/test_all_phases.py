@@ -58,7 +58,7 @@ def get_system_info() -> dict:
     }
 
 
-def test_phase1_engine_abstraction() -> bool:
+def _run_phase1_engine_abstraction() -> bool:
     """Test Phase 1: InferenceEngine abstraction layer."""
     print_header("Phase 1: InferenceEngine Abstraction Layer")
     all_passed = True
@@ -162,7 +162,7 @@ def test_phase1_engine_abstraction() -> bool:
     return all_passed
 
 
-def test_phase2_instance_types() -> bool:
+def _run_phase2_instance_types() -> bool:
     """Test Phase 2: Extended instance types."""
     print_header("Phase 2: Extended Instance Types")
     all_passed = True
@@ -227,14 +227,14 @@ def test_phase2_instance_types() -> bool:
     return all_passed
 
 
-def test_phase3_cuda_engine() -> bool:
+def _run_phase3_cuda_engine() -> bool:
     """Test Phase 3: CUDA engine implementation."""
     print_header("Phase 3: CUDA Engine Implementation")
     all_passed = True
 
     if sys.platform == "darwin":
         print("  Skipping CUDA tests on macOS (testing MLX engine instead)")
-        return test_mlx_engine()
+        return _run_mlx_engine()
 
     print_subheader("3.1 CUDA Module Availability")
     try:
@@ -286,7 +286,7 @@ def test_phase3_cuda_engine() -> bool:
     return all_passed
 
 
-def test_mlx_engine() -> bool:
+def _run_mlx_engine() -> bool:
     """Test MLX engine on macOS."""
     all_passed = True
 
@@ -310,7 +310,7 @@ def test_mlx_engine() -> bool:
     return all_passed
 
 
-def test_phase4_model_sharding() -> bool:
+def _run_phase4_model_sharding() -> bool:
     """Test Phase 4: Model sharding strategies."""
     print_header("Phase 4: Model Sharding")
     all_passed = True
@@ -370,7 +370,7 @@ def test_phase4_model_sharding() -> bool:
     return all_passed
 
 
-async def test_phase5_hardware_detection() -> bool:
+async def _run_phase5_hardware_detection() -> bool:
     """Test Phase 5: Hardware detection and monitoring."""
     print_header("Phase 5: Hardware Detection and Monitoring")
     all_passed = True
@@ -463,7 +463,7 @@ async def test_phase5_hardware_detection() -> bool:
     return all_passed
 
 
-def test_phase6_runner_engine_selection() -> bool:
+def _run_phase6_runner_engine_selection() -> bool:
     """Test Phase 6: Runner engine selection."""
     print_header("Phase 6: Runner Engine Selection")
     all_passed = True
@@ -588,7 +588,7 @@ def test_phase6_runner_engine_selection() -> bool:
     return all_passed
 
 
-def test_type_checker_compliance() -> bool:
+def _run_type_checker_compliance() -> bool:
     """Test that all modules pass type checking."""
     print_header("Type Checker Compliance")
 
@@ -654,13 +654,13 @@ async def main() -> int:
     results = {}
 
     # Run all phase tests
-    results["Phase 1: Engine Abstraction"] = test_phase1_engine_abstraction()
-    results["Phase 2: Instance Types"] = test_phase2_instance_types()
-    results["Phase 3: CUDA/MLX Engine"] = test_phase3_cuda_engine()
-    results["Phase 4: Model Sharding"] = test_phase4_model_sharding()
-    results["Phase 5: Hardware Detection"] = await test_phase5_hardware_detection()
-    results["Phase 6: Runner Engine Selection"] = test_phase6_runner_engine_selection()
-    results["Type Checker Compliance"] = test_type_checker_compliance()
+    results["Phase 1: Engine Abstraction"] = _run_phase1_engine_abstraction()
+    results["Phase 2: Instance Types"] = _run_phase2_instance_types()
+    results["Phase 3: CUDA/MLX Engine"] = _run_phase3_cuda_engine()
+    results["Phase 4: Model Sharding"] = _run_phase4_model_sharding()
+    results["Phase 5: Hardware Detection"] = await _run_phase5_hardware_detection()
+    results["Phase 6: Runner Engine Selection"] = _run_phase6_runner_engine_selection()
+    results["Type Checker Compliance"] = _run_type_checker_compliance()
 
     # Summary
     print_header("TEST SUMMARY")
@@ -678,6 +678,42 @@ async def main() -> int:
     print("=" * 70 + "\n")
 
     return 0 if all_passed else 1
+
+
+# Pytest-compatible wrapper functions (don't return values)
+def test_phase1_engine_abstraction() -> None:
+    """Pytest wrapper for Phase 1 tests."""
+    assert _run_phase1_engine_abstraction()
+
+
+def test_phase2_instance_types() -> None:
+    """Pytest wrapper for Phase 2 tests."""
+    assert _run_phase2_instance_types()
+
+
+def test_phase3_cuda_engine() -> None:
+    """Pytest wrapper for Phase 3 tests."""
+    assert _run_phase3_cuda_engine()
+
+
+def test_mlx_engine() -> None:
+    """Pytest wrapper for MLX engine tests."""
+    assert _run_mlx_engine()
+
+
+def test_phase4_model_sharding() -> None:
+    """Pytest wrapper for Phase 4 tests."""
+    assert _run_phase4_model_sharding()
+
+
+def test_phase6_runner_engine_selection() -> None:
+    """Pytest wrapper for Phase 6 tests."""
+    assert _run_phase6_runner_engine_selection()
+
+
+def test_type_checker_compliance() -> None:
+    """Pytest wrapper for type checker compliance tests."""
+    assert _run_type_checker_compliance()
 
 
 if __name__ == "__main__":

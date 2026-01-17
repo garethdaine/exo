@@ -126,3 +126,14 @@ env = [
   "EXO_TESTS=1"
 ]
 addopts = "-m 'not slow'"
+filterwarnings = [
+    # Ignore ResourceWarning from anyio streams in tests - election tests use
+    # fire-and-forget patterns where receivers/senders may not be fully closed
+    "ignore:Unclosed <Sender:ResourceWarning",
+    "ignore:Unclosed <Receiver:ResourceWarning",
+    # Ignore deprecation warnings from external libraries (pynvml SWIG bindings)
+    "ignore:builtin type Swig:DeprecationWarning",
+    "ignore:builtin type swigvarlink:DeprecationWarning",
+    # Ignore fork warning from multiprocessing on Python 3.13
+    "ignore:This process.*is multi-threaded:DeprecationWarning",
+]

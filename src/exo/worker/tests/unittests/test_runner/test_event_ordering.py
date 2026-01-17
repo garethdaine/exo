@@ -150,6 +150,9 @@ def patch_out_engine(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(runner_module, "_check_for_debug_prompts", nothin)
 
 
+EXPECTED_EVENT_COUNT = 27
+
+
 def _run(tasks: Iterable[Task]):
     bound_instance = get_bound_mlx_ring_instance(
         instance_id=INSTANCE_1_ID,
@@ -174,7 +177,10 @@ def _run(tasks: Iterable[Task]):
 
         runner_module.main(bound_instance, event_sender, task_receiver)
 
-        return event_receiver.collect()
+        # Use receive_at_least to wait for all expected events to be received.
+        # This fixes the race condition where collect() was called before all
+        # events were available in the multiprocessing queue buffer.
+        return event_receiver.receive_at_least(EXPECTED_EVENT_COUNT)
 
 
 def test_events_processed_in_correct_order(patch_out_engine: pytest.MonkeyPatch):
