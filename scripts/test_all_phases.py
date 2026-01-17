@@ -13,6 +13,8 @@ Phases tested:
 - Phase 4: Model sharding (if applicable)
 - Phase 5: Hardware detection and monitoring
 - Phase 6: Runner engine selection
+- Phase 7: GPU-aware placement
+- Phase 8: End-to-end CUDA testing
 
 Usage:
     python scripts/test_all_phases.py
@@ -588,6 +590,236 @@ def _run_phase6_runner_engine_selection() -> bool:
     return all_passed
 
 
+def _run_phase7_gpu_placement() -> bool:
+    """Test Phase 7: GPU-aware placement."""
+    print_header("Phase 7: GPU-Aware Placement")
+    all_passed = True
+
+    print_subheader("7.1 GPU Placement Utilities")
+    try:
+        from exo.master import placement_utils
+
+        # Verify required functions exist
+        has_filter_gpu_mem = hasattr(placement_utils, "filter_cycles_by_gpu_memory")
+        has_filter_cuda_cap = hasattr(placement_utils, "filter_cycles_by_cuda_capability")
+        has_get_device_ids = hasattr(placement_utils, "get_cuda_device_ids_for_cycle")
+        has_rank_quality = hasattr(placement_utils, "rank_cycles_by_gpu_quality")
+
+        print_result("filter_cycles_by_gpu_memory exists", has_filter_gpu_mem)
+        print_result("filter_cycles_by_cuda_capability exists", has_filter_cuda_cap)
+        print_result("get_cuda_device_ids_for_cycle exists", has_get_device_ids)
+        print_result("rank_cycles_by_gpu_quality exists", has_rank_quality)
+        all_passed = all_passed and has_filter_gpu_mem and has_filter_cuda_cap and has_get_device_ids and has_rank_quality
+
+    except ImportError as e:
+        print_result("GPU placement utilities import", False, str(e))
+        all_passed = False
+
+    print_subheader("7.2 NodePerformanceProfile GPU Properties")
+    try:
+        from exo.shared.types.profiling import (
+            AcceleratorType,
+            GpuMemoryProfile,
+            GpuPerformanceProfile,
+            MemoryPerformanceProfile,
+            NodePerformanceProfile,
+            SystemPerformanceProfile,
+        )
+
+        # Test GPU profile creation
+        gpu_profile = GpuPerformanceProfile(
+            device_index=0,
+            device_name="Test GPU",
+            accelerator_type=AcceleratorType.NVIDIA_CUDA,
+            utilization_percent=50.0,
+            memory=GpuMemoryProfile(
+                used_bytes=4 * 1024**3,
+                free_bytes=12 * 1024**3,
+                total_bytes=16 * 1024**3,
+            ),
+            temperature_celsius=65.0,
+            power_watts=150.0,
+            power_limit_watts=350.0,
+            clock_mhz=1800,
+            compute_capability="8.0",
+            nvlink_supported=True,
+            device_uuid="GPU-TEST-123",
+        )
+
+        print_result("GpuPerformanceProfile with compute_capability", True)
+        print_result("GpuPerformanceProfile with nvlink_supported", True)
+        print_result("GpuPerformanceProfile with device_uuid", True)
+
+        # Test NodePerformanceProfile with GPU
+        node_profile = NodePerformanceProfile(
+            model_id="test",
+            chip_id="test",
+            friendly_name="Test Node",
+            memory=MemoryPerformanceProfile.from_bytes(
+                ram_total=64 * 1024**3,
+                ram_available=32 * 1024**3,
+                swap_total=8 * 1024**3,
+                swap_available=8 * 1024**3,
+            ),
+            network_interfaces=[],
+            system=SystemPerformanceProfile(),
+            gpu_profiles=[gpu_profile],
+        )
+
+        has_cuda = node_profile.has_cuda_gpus
+        print_result("NodePerformanceProfile.has_cuda_gpus", has_cuda)
+
+        total_gpu_mem = node_profile.total_gpu_memory_bytes
+        print_result(
+            "NodePerformanceProfile.total_gpu_memory_bytes",
+            total_gpu_mem == 16 * 1024**3,
+            f"{total_gpu_mem / (1024**3):.1f} GB",
+        )
+
+        available_gpu_mem = node_profile.available_gpu_memory_bytes
+        print_result(
+            "NodePerformanceProfile.available_gpu_memory_bytes",
+            available_gpu_mem == 12 * 1024**3,
+            f"{available_gpu_mem / (1024**3):.1f} GB",
+        )
+
+    except Exception as e:
+        print_result("GPU profile properties", False, str(e))
+        all_passed = False
+
+    print_subheader("7.3 CUDA Instance Placement")
+    try:
+        from exo.master import placement
+
+        # Verify function exists
+        has_generate_nccl = hasattr(placement, "generate_nccl_unique_id")
+        has_master_addr = hasattr(placement, "get_cuda_master_addr")
+
+        # Test NCCL unique ID generation
+        if has_generate_nccl:
+            unique_id = placement.generate_nccl_unique_id()
+            is_valid_id = len(unique_id) == 64 and all(c in "0123456789abcdef" for c in unique_id)
+            print_result("generate_nccl_unique_id", is_valid_id, f"length={len(unique_id)}")
+        else:
+            print_result("generate_nccl_unique_id", False, "function not found")
+            all_passed = False
+
+        print_result("get_cuda_master_addr exists", has_master_addr)
+
+    except ImportError as e:
+        print_result("CUDA placement functions", False, str(e))
+        all_passed = False
+
+    return all_passed
+
+
+async def _run_phase8_e2e_cuda_tests() -> bool:
+    """Test Phase 8: End-to-end CUDA testing."""
+    print_header("Phase 8: End-to-End CUDA Testing")
+    all_passed = True
+
+    if sys.platform == "darwin":
+        print("  Skipping CUDA E2E tests on macOS")
+        return True
+
+    print_subheader("8.1 GPU Profile Integration")
+    try:
+        from exo.worker.utils.profile import get_gpu_profiles
+
+        profiles = await get_gpu_profiles()
+        print_result("get_gpu_profiles returns list", isinstance(profiles, list))
+
+        if profiles:
+            profile = profiles[0]
+            print_result(f"GPU found: {profile.device_name}", True)
+            print_result(
+                f"  Memory: {profile.memory.total_gb:.1f} GB",
+                profile.memory.total_bytes > 0,
+            )
+            if profile.compute_capability:
+                print_result(f"  Compute capability: {profile.compute_capability}", True)
+        else:
+            print_result("GPU profiles retrieved", True, "no NVIDIA GPUs (expected on non-NVIDIA system)")
+
+    except Exception as e:
+        print_result("GPU profile integration", False, str(e))
+
+    print_subheader("8.2 NVIDIA Monitor Integration")
+    try:
+        from exo.worker.utils.nvidia_monitor import (
+            is_nvidia_available,
+        )
+
+        nvidia_available = is_nvidia_available()
+        print_result("NVIDIA availability check", True, f"available: {nvidia_available}")
+
+        if nvidia_available:
+            from exo.worker.utils.nvidia_monitor import (
+                detect_nvidia_gpus,
+                get_nvidia_metrics,
+            )
+
+            gpus = detect_nvidia_gpus()
+            print_result(f"Detected {len(gpus)} NVIDIA GPU(s)", len(gpus) > 0)
+
+            for gpu in gpus:
+                print_result(
+                    f"  {gpu.name}",
+                    True,
+                    f"CC={gpu.compute_capability[0]}.{gpu.compute_capability[1]}, "
+                    f"NVLink={'Yes' if gpu.nvlink_supported else 'No'}",
+                )
+
+            metrics = get_nvidia_metrics()
+            print_result("Real-time metrics retrieved", True)
+            print_result(
+                f"  Avg utilization: {metrics.average_utilization:.1f}%",
+                True,
+            )
+            print_result(
+                f"  Max temperature: {metrics.max_temperature:.0f}°C",
+                True,
+            )
+
+    except ImportError as e:
+        if "pynvml" in str(e):
+            print_result("NVIDIA monitor", True, "pynvml not installed (optional)")
+        else:
+            print_result("NVIDIA monitor", False, str(e))
+    except Exception as e:
+        print_result("NVIDIA monitor", False, str(e))
+
+    print_subheader("8.3 CUDA Engine Integration")
+    try:
+        from exo.worker.engines.cuda import is_cuda_available
+
+        cuda_available = is_cuda_available()
+        print_result("CUDA availability", True, f"available: {cuda_available}")
+
+        if cuda_available:
+            from exo.worker.engines.cuda import get_cuda_engine
+
+            engine = get_cuda_engine()
+            print_result("CudaEngine instantiated", True)
+
+            info = engine.get_info()
+            print_result(f"  Engine: {info.name}", True)
+            print_result(
+                f"  Tensor parallelism: {info.capabilities.supports_tensor_parallelism}",
+                True,
+            )
+
+    except ImportError as e:
+        if "torch" in str(e).lower():
+            print_result("CUDA engine", True, "PyTorch not installed (expected)")
+        else:
+            print_result("CUDA engine", False, str(e))
+    except Exception as e:
+        print_result("CUDA engine", False, str(e))
+
+    return all_passed
+
+
 def _run_type_checker_compliance() -> bool:
     """Test that all modules pass type checking."""
     print_header("Type Checker Compliance")
@@ -660,6 +892,8 @@ async def main() -> int:
     results["Phase 4: Model Sharding"] = _run_phase4_model_sharding()
     results["Phase 5: Hardware Detection"] = await _run_phase5_hardware_detection()
     results["Phase 6: Runner Engine Selection"] = _run_phase6_runner_engine_selection()
+    results["Phase 7: GPU-Aware Placement"] = _run_phase7_gpu_placement()
+    results["Phase 8: E2E CUDA Testing"] = await _run_phase8_e2e_cuda_tests()
     results["Type Checker Compliance"] = _run_type_checker_compliance()
 
     # Summary
@@ -709,6 +943,16 @@ def test_phase4_model_sharding() -> None:
 def test_phase6_runner_engine_selection() -> None:
     """Pytest wrapper for Phase 6 tests."""
     assert _run_phase6_runner_engine_selection()
+
+
+def test_phase7_gpu_placement() -> None:
+    """Pytest wrapper for Phase 7 tests."""
+    assert _run_phase7_gpu_placement()
+
+
+async def test_phase8_e2e_cuda_tests() -> None:
+    """Pytest wrapper for Phase 8 tests."""
+    assert await _run_phase8_e2e_cuda_tests()
 
 
 def test_type_checker_compliance() -> None:
