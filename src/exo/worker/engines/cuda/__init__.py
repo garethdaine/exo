@@ -33,6 +33,10 @@ from typing import TYPE_CHECKING
 
 # Lazy imports to avoid ImportError on platforms without PyTorch
 if TYPE_CHECKING:
+    from exo.worker.engines.cuda.auto_parallel import (
+        pipeline_auto_parallel,
+        tensor_auto_parallel,
+    )
     from exo.worker.engines.cuda.distributed import (
         GlooDistributedGroup,
         NcclDistributedGroup,
@@ -45,6 +49,8 @@ __all__ = [
     "GlooDistributedGroup",
     "get_cuda_engine",
     "is_cuda_available",
+    "pipeline_auto_parallel",
+    "tensor_auto_parallel",
 ]
 
 
