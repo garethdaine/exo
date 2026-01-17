@@ -21,7 +21,6 @@ from exo.shared.types.worker.instances import BoundInstance
 from exo.shared.types.worker.runner_response import GenerationResponse
 from exo.shared.types.worker.shards import ShardMetadata
 
-
 # Type alias for timeout callbacks used during model loading
 # Defined early to avoid forward reference issues
 TimeoutCallback = Callable[[], None]

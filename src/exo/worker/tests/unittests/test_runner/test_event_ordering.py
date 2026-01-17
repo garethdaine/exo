@@ -108,30 +108,30 @@ def assert_events_equal(test_events: Iterable[Event], true_events: Iterable[Even
         assert test_event == true_event, f"{test_event} != {true_event}"
 
 
-def _create_mock_engine():
+def _create_mock_engine() -> MagicMock:
     """Create a mock InferenceEngine for testing."""
-    mock_engine = MagicMock()
+    mock_engine: MagicMock = MagicMock()
 
     # Mock distributed group
-    mock_group = MagicMock()
-    mock_group.rank.return_value = 0
-    mock_group.size.return_value = 1
-    mock_engine.initialize_distributed.return_value = mock_group
+    mock_group: MagicMock = MagicMock()
+    mock_group.rank.return_value = 0  # pyright: ignore[reportAny]
+    mock_group.size.return_value = 1  # pyright: ignore[reportAny]
+    mock_engine.initialize_distributed.return_value = mock_group  # pyright: ignore[reportAny]
 
     # Mock load_model - return (model, tokenizer)
-    mock_engine.load_model.return_value = (MagicMock(), MagicMock())
+    mock_engine.load_model.return_value = (MagicMock(), MagicMock())  # pyright: ignore[reportAny]
 
     # Mock warmup
-    mock_engine.warmup.return_value = 1
+    mock_engine.warmup.return_value = 1  # pyright: ignore[reportAny]
 
     # Mock generate - yield a generation response
     def fake_generate(*_1: object, **_2: object):
         yield GenerationResponse(token=0, text="hi", finish_reason="stop")
 
-    mock_engine.generate.side_effect = fake_generate
+    mock_engine.generate.side_effect = fake_generate  # pyright: ignore[reportAny]
 
     # Mock cleanup
-    mock_engine.cleanup.return_value = None
+    mock_engine.cleanup.return_value = None  # pyright: ignore[reportAny]
 
     return mock_engine
 

@@ -26,7 +26,10 @@ def check_nvidia_available():
     print("Testing NVIDIA GPU Availability")
     print("=" * 60)
 
-    from exo.worker.utils.nvidia_monitor import is_nvidia_available, get_nvidia_device_count
+    from exo.worker.utils.nvidia_monitor import (
+        get_nvidia_device_count,
+        is_nvidia_available,
+    )
 
     available = is_nvidia_available()
     print(f"NVIDIA available: {available}")
@@ -69,8 +72,8 @@ async def check_gpu_metrics():
     print("=" * 60)
 
     from exo.worker.utils.nvidia_monitor import (
-        get_nvidia_metrics_async,
         format_gpu_metrics,
+        get_nvidia_metrics_async,
     )
 
     try:

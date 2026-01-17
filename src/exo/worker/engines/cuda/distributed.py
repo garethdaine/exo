@@ -36,8 +36,7 @@ from exo.shared.types.worker.instances import (
 from exo.worker.engines.base import DistributedGroup
 
 if TYPE_CHECKING:
-    import torch
-    import torch.distributed as dist
+    pass
 
 
 class NcclDistributedGroup(DistributedGroup):

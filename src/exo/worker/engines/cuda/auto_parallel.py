@@ -44,7 +44,7 @@ Note:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol
 
 from loguru import logger
 
@@ -52,7 +52,6 @@ from exo.shared.types.worker.shards import PipelineShardMetadata
 
 if TYPE_CHECKING:
     import torch
-    import torch.distributed as dist
     import torch.nn as nn
 
 
@@ -121,7 +120,6 @@ class PipelineFirstLayer(CustomCudaLayer):
     def forward(
         self, x: "torch.Tensor", *args: object, **kwargs: object
     ) -> "torch.Tensor":
-        import torch
         import torch.distributed as dist
 
         if self._rank != 0:
@@ -263,7 +261,6 @@ def shard_linear_all_to_sharded(
     The input is replicated across all ranks, and each rank computes
     a shard of the output. Used for Q, K, V projections.
     """
-    import torch
     import torch.distributed as dist
     import torch.nn as nn
 
@@ -308,7 +305,6 @@ def shard_linear_sharded_to_all(
     Each rank has a shard of the input, and the output is all-reduced
     to produce the full output. Used for output projections.
     """
-    import torch
     import torch.distributed as dist
     import torch.nn as nn
 

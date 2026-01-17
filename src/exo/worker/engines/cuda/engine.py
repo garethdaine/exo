@@ -64,8 +64,7 @@ from exo.worker.engines.cuda.utils_cuda import (
 )
 
 if TYPE_CHECKING:
-    import torch
-    from transformers import PreTrainedModel, PreTrainedTokenizerBase
+    pass
 
 
 class CudaEngine(InferenceEngine):
@@ -190,7 +189,6 @@ class CudaEngine(InferenceEngine):
         Raises:
             RuntimeError: If model loading fails.
         """
-        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         shard_metadata = bound_instance.bound_shard
@@ -201,9 +199,8 @@ class CudaEngine(InferenceEngine):
         # Determine device
         instance = bound_instance.instance
         device_id = 0
-        if isinstance(instance, (CudaNcclInstance, CudaGlooInstance)):
-            if instance.device_ids:
-                device_id = instance.device_ids[0]
+        if isinstance(instance, (CudaNcclInstance, CudaGlooInstance)) and instance.device_ids:
+            device_id = instance.device_ids[0]
 
         device = initialize_cuda_device(device_id)
         dtype = get_optimal_dtype()
@@ -246,7 +243,7 @@ class CudaEngine(InferenceEngine):
         Returns:
             The number of tokens generated during warmup.
         """
-        from transformers import PreTrainedModel, PreTrainedTokenizerBase
+        from transformers import PreTrainedModel
 
         # Type narrowing for pyright
         assert isinstance(model, PreTrainedModel)
@@ -308,9 +305,8 @@ class CudaEngine(InferenceEngine):
         logger.info("Cleaning up CUDA resources")
 
         # Clean up distributed group
-        if group is not None:
-            if isinstance(group, (NcclDistributedGroup, GlooDistributedGroup)):
-                group.cleanup()
+        if group is not None and isinstance(group, (NcclDistributedGroup, GlooDistributedGroup)):
+            group.cleanup()
 
         # Delete model and tokenizer
         if model is not None:

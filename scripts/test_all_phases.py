@@ -67,11 +67,11 @@ def test_phase1_engine_abstraction() -> bool:
     print_subheader("1.1 Base Protocols")
     try:
         from exo.worker.engines.base import (
-            DistributedGroup,
-            EngineCapabilities,
-            EngineInfo,
+            DistributedGroup,  # noqa: F401 - checking import availability
+            EngineCapabilities,  # noqa: F401 - checking import availability
+            EngineInfo,  # noqa: F401 - checking import availability
             InferenceEngine,
-            Tokenizer,
+            Tokenizer,  # noqa: F401 - checking import availability
         )
 
         print_result("InferenceEngine protocol exists", True)
@@ -172,7 +172,7 @@ def test_phase2_instance_types() -> bool:
         from exo.shared.types.worker.instances import (
             CudaGlooInstance,
             CudaNcclInstance,
-            MlxRingInstance,
+            MlxRingInstance,  # noqa: F401 - checking import availability
         )
 
         print_result("MlxRingInstance exists", True)
@@ -272,8 +272,8 @@ def test_phase3_cuda_engine() -> bool:
     print_subheader("3.3 Distributed Groups")
     try:
         from exo.worker.engines.cuda.distributed import (
-            GlooDistributedGroup,
-            NcclDistributedGroup,
+            GlooDistributedGroup,  # noqa: F401 - checking import availability
+            NcclDistributedGroup,  # noqa: F401 - checking import availability
         )
 
         print_result("NcclDistributedGroup exists", True)
@@ -334,7 +334,7 @@ def test_phase4_model_sharding() -> bool:
                 ("QwenShardingStrategy", QwenShardingStrategy),
                 ("GptOssShardingStrategy", GptOssShardingStrategy),
             ]
-            for name, strategy in strategies:
+            for name, _strategy in strategies:
                 print_result(f"{name} exists", True)
 
         except ImportError as e:
@@ -359,7 +359,7 @@ def test_phase4_model_sharding() -> bool:
                 ("QwenShardingStrategy", QwenShardingStrategy),
                 ("GptOssShardingStrategy", GptOssShardingStrategy),
             ]
-            for name, strategy in strategies:
+            for name, _strategy in strategies:
                 print_result(f"{name} exists", True)
 
         except (ImportError, TypeError) as e:
@@ -470,17 +470,19 @@ def test_phase6_runner_engine_selection() -> bool:
 
     print_subheader("6.1 Engine Selection Functions")
     try:
-        from exo.worker.engines import get_engine_name_for_instance
+        from exo.worker.engines import (
+            get_engine_name_for_instance,  # noqa: F401 - checking import availability
+        )
 
         print_result("get_engine_name_for_instance exists", True)
 
         # Test engine name selection for each instance type
         from exo.shared.types.worker.instances import (
-            CudaGlooInstance,
-            CudaNcclInstance,
-            MlxJacclInstance,
-            MlxRingInstance,
-            VulkanComputeInstance,
+            CudaGlooInstance,  # noqa: F401 - checking import availability
+            CudaNcclInstance,  # noqa: F401 - checking import availability
+            MlxJacclInstance,  # noqa: F401 - checking import availability
+            MlxRingInstance,  # noqa: F401 - checking import availability
+            VulkanComputeInstance,  # noqa: F401 - checking import availability
         )
 
         # Create minimal mock instances to test engine selection
@@ -494,9 +496,9 @@ def test_phase6_runner_engine_selection() -> bool:
     print_subheader("6.2 Runner Module")
     try:
         from exo.worker.runner.runner import (
-            _get_engine_for_instance,
-            _requires_distributed_init,
-            main,
+            _get_engine_for_instance,  # noqa: F401 - checking import availability
+            _requires_distributed_init,  # noqa: F401 - checking import availability
+            main,  # noqa: F401 - checking import availability
         )
 
         print_result("Runner main function exists", True)

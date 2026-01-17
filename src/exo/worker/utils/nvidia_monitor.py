@@ -40,6 +40,7 @@ Note:
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -263,10 +264,8 @@ def detect_nvidia_gpus() -> list[NvidiaGpuInfo]:
 
             # Check for multi-GPU board
             is_multi_gpu = False
-            try:
+            with contextlib.suppress(pynvml.NVMLError):
                 is_multi_gpu = pynvml.nvmlDeviceGetMultiGpuBoard(handle) == 1
-            except pynvml.NVMLError:
-                pass
 
             gpus.append(
                 NvidiaGpuInfo(
@@ -360,12 +359,10 @@ def get_nvidia_metrics() -> NvidiaMetrics:
 
             # Get temperature
             temperature = 0.0
-            try:
+            with contextlib.suppress(pynvml.NVMLError):
                 temperature = float(
                     pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
                 )
-            except pynvml.NVMLError:
-                pass
 
             # Get power usage
             power_draw = 0.0
@@ -395,10 +392,8 @@ def get_nvidia_metrics() -> NvidiaMetrics:
 
             # Get fan speed (may not be available on all GPUs)
             fan_speed: float | None = None
-            try:
+            with contextlib.suppress(pynvml.NVMLError):
                 fan_speed = float(pynvml.nvmlDeviceGetFanSpeed(handle))
-            except pynvml.NVMLError:
-                pass
 
             # Get PCIe throughput
             pcie_tx: int | None = None
@@ -491,10 +486,8 @@ def get_gpu_memory_info(device_index: int = 0) -> tuple[int, int, int]:
     except pynvml.NVMLError as e:
         raise NvidiaMonitorError(f"Failed to get memory info for GPU {device_index}: {e}") from e
     finally:
-        try:
+        with contextlib.suppress(Exception):
             pynvml.nvmlShutdown()
-        except Exception:
-            pass
 
 
 def format_gpu_info(gpu: NvidiaGpuInfo) -> str:

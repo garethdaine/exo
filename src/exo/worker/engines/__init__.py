@@ -20,8 +20,8 @@ Usage:
 """
 
 from exo.worker.engines.base import (
-    DistributedGroup,
     Detokenizer,
+    DistributedGroup,
     EngineCapabilities,
     EngineInfo,
     InferenceEngine,

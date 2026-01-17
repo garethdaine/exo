@@ -143,7 +143,6 @@ class CudaKVCache:
         Returns:
             Total memory usage in bytes.
         """
-        import torch
 
         total_bytes = 0
         for cache in self.key_cache + self.value_cache:

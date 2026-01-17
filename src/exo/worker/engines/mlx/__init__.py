@@ -63,8 +63,8 @@ class TokenizerWrapper:
     ) -> str: ...
 
 
-# Engine exports
-from exo.worker.engines.mlx.engine import (
+# Engine exports (after type stubs that use MLX types)
+from exo.worker.engines.mlx.engine import (  # noqa: E402
     MlxDistributedGroupWrapper,
     MlxEngine,
     get_mlx_engine,

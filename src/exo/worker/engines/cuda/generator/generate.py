@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -40,7 +40,6 @@ from exo.shared.types.tasks import ChatCompletionTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
 
 if TYPE_CHECKING:
-    import torch
     from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 
