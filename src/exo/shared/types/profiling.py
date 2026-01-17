@@ -1,9 +1,60 @@
+from enum import Enum
 from typing import Self
 
 import psutil
 
 from exo.shared.types.memory import Memory
 from exo.utils.pydantic_ext import CamelCaseModel
+
+
+class AcceleratorType(str, Enum):
+    """Type of hardware accelerator."""
+
+    APPLE_SILICON = "apple_silicon"
+    NVIDIA_CUDA = "nvidia_cuda"
+    AMD_ROCM = "amd_rocm"
+    INTEL_ONEAPI = "intel_oneapi"
+    VULKAN = "vulkan"
+    CPU_ONLY = "cpu_only"
+
+
+class GpuMemoryProfile(CamelCaseModel):
+    """Memory profile for a GPU device."""
+
+    used_bytes: int
+    free_bytes: int
+    total_bytes: int
+
+    @property
+    def used_gb(self) -> float:
+        """Memory used in gigabytes."""
+        return self.used_bytes / (1024**3)
+
+    @property
+    def total_gb(self) -> float:
+        """Total memory in gigabytes."""
+        return self.total_bytes / (1024**3)
+
+    @property
+    def utilization_percent(self) -> float:
+        """Memory utilization as a percentage."""
+        if self.total_bytes == 0:
+            return 0.0
+        return (self.used_bytes / self.total_bytes) * 100
+
+
+class GpuPerformanceProfile(CamelCaseModel):
+    """Performance profile for a single GPU device."""
+
+    device_index: int
+    device_name: str
+    accelerator_type: AcceleratorType
+    utilization_percent: float = 0.0
+    memory: GpuMemoryProfile
+    temperature_celsius: float = 0.0
+    power_watts: float = 0.0
+    power_limit_watts: float = 0.0
+    clock_mhz: int = 0
 
 
 class MemoryPerformanceProfile(CamelCaseModel):

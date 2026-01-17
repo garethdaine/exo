@@ -1,6 +1,7 @@
 import asyncio
 import os
 import platform
+import sys
 from typing import Any, Callable, Coroutine
 
 import anyio
@@ -8,6 +9,9 @@ from loguru import logger
 
 from exo.shared.types.memory import Memory
 from exo.shared.types.profiling import (
+    AcceleratorType,
+    GpuMemoryProfile,
+    GpuPerformanceProfile,
     MemoryPerformanceProfile,
     NodePerformanceProfile,
     SystemPerformanceProfile,
@@ -32,6 +36,43 @@ async def get_metrics_async() -> Metrics | None:
 
     if platform.system().lower() == "darwin":
         return await macmon_get_metrics_async()
+
+
+async def get_gpu_profiles() -> list[GpuPerformanceProfile]:
+    """Get performance profiles for all available GPUs."""
+    profiles: list[GpuPerformanceProfile] = []
+
+    # Try NVIDIA GPUs (Linux/Windows)
+    if sys.platform in ("linux", "win32"):
+        try:
+            from .nvidia_monitor import NvidiaMonitorError, get_nvidia_metrics_async
+
+            try:
+                metrics = await get_nvidia_metrics_async()
+                for gpu in metrics.gpus:
+                    profiles.append(
+                        GpuPerformanceProfile(
+                            device_index=gpu.index,
+                            device_name=gpu.name,
+                            accelerator_type=AcceleratorType.NVIDIA_CUDA,
+                            utilization_percent=gpu.utilization_gpu,
+                            memory=GpuMemoryProfile(
+                                used_bytes=gpu.memory_used_bytes,
+                                free_bytes=gpu.memory_free_bytes,
+                                total_bytes=gpu.memory_total_bytes,
+                            ),
+                            temperature_celsius=gpu.temperature_c,
+                            power_watts=gpu.power_draw_watts,
+                            power_limit_watts=gpu.power_limit_watts,
+                            clock_mhz=gpu.clock_graphics_mhz,
+                        )
+                    )
+            except NvidiaMonitorError:
+                pass
+        except ImportError:
+            pass
+
+    return profiles
 
 
 def get_memory_profile() -> MemoryPerformanceProfile:
