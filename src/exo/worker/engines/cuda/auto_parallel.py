@@ -81,13 +81,15 @@ class DistributedGroupProtocol(Protocol):
 # =============================================================================
 
 
-class CustomCudaLayer("nn.Module"):
-    """Base class for replacing a PyTorch layer with a custom implementation."""
+class CustomCudaLayer:
+    """Base class for replacing a PyTorch layer with a custom implementation.
+
+    Note: This class does not inherit from nn.Module directly to avoid import errors
+    on systems without PyTorch. Concrete implementations should properly inherit
+    from nn.Module when PyTorch is available.
+    """
 
     def __init__(self, original_layer: "nn.Module") -> None:
-        import torch.nn as nn
-
-        super().__init__()
         self._original_layer = original_layer
 
     def __getattr__(self, name: str) -> Any:
@@ -343,13 +345,15 @@ def shard_linear_sharded_to_all(
     return new_linear
 
 
-class AllReduceLinear("nn.Module"):
-    """Linear layer wrapper that performs all-reduce after the linear operation."""
+class AllReduceLinear:
+    """Linear layer wrapper that performs all-reduce after the linear operation.
+
+    Note: This class does not inherit from nn.Module directly to avoid import errors
+    on systems without PyTorch. When instantiated, the caller should ensure PyTorch
+    is available.
+    """
 
     def __init__(self, linear: "nn.Module", process_group: Any) -> None:
-        import torch.nn as nn
-
-        super().__init__()
         self.linear = linear
         self._process_group = process_group
 
@@ -359,6 +363,9 @@ class AllReduceLinear("nn.Module"):
         output = self.linear(x)
         dist.all_reduce(output, group=self._process_group)
         return output
+
+    def __call__(self, x: "torch.Tensor") -> "torch.Tensor":
+        return self.forward(x)
 
 
 # =============================================================================
