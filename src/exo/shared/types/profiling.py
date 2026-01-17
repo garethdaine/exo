@@ -55,6 +55,13 @@ class GpuPerformanceProfile(CamelCaseModel):
     power_watts: float = 0.0
     power_limit_watts: float = 0.0
     clock_mhz: int = 0
+    # Compute capability for NVIDIA GPUs (e.g., "8.0" for SM 8.0)
+    # Used for placement decisions to ensure GPU meets model requirements
+    compute_capability: str | None = None
+    # Whether this GPU supports NVLink for high-bandwidth multi-GPU communication
+    nvlink_supported: bool = False
+    # Device UUID for unique identification
+    device_uuid: str | None = None
 
 
 class MemoryPerformanceProfile(CamelCaseModel):
@@ -110,6 +117,27 @@ class NodePerformanceProfile(CamelCaseModel):
     memory: MemoryPerformanceProfile
     network_interfaces: list[NetworkInterfaceInfo] = []
     system: SystemPerformanceProfile
+    # GPU profiles for all accelerators on this node (NVIDIA, etc.)
+    # Used by Master for GPU-aware placement decisions
+    gpu_profiles: list[GpuPerformanceProfile] = []
+
+    @property
+    def total_gpu_memory_bytes(self) -> int:
+        """Total GPU memory across all GPUs on this node."""
+        return sum(gpu.memory.total_bytes for gpu in self.gpu_profiles)
+
+    @property
+    def available_gpu_memory_bytes(self) -> int:
+        """Available GPU memory across all GPUs on this node."""
+        return sum(gpu.memory.free_bytes for gpu in self.gpu_profiles)
+
+    @property
+    def has_cuda_gpus(self) -> bool:
+        """Whether this node has NVIDIA CUDA GPUs."""
+        return any(
+            gpu.accelerator_type == AcceleratorType.NVIDIA_CUDA
+            for gpu in self.gpu_profiles
+        )
 
 
 class ConnectionProfile(CamelCaseModel):

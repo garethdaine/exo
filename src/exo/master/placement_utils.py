@@ -44,6 +44,181 @@ def filter_cycles_by_memory(
     return filtered_cycles
 
 
+def filter_cycles_by_gpu_memory(
+    cycles: list[list[NodeInfo]], required_memory: Memory
+) -> list[list[NodeInfo]]:
+    """Filter cycles to those with sufficient total GPU memory.
+
+    This is used for CUDA instances where model weights must fit in GPU VRAM.
+    A cycle passes if the sum of available GPU memory across all nodes
+    is at least the required memory.
+
+    Args:
+        cycles: List of node cycles to filter.
+        required_memory: Minimum total GPU memory needed.
+
+    Returns:
+        Cycles that have sufficient combined GPU memory.
+    """
+    filtered_cycles: list[list[NodeInfo]] = []
+    for cycle in cycles:
+        if not narrow_all_nodes(cycle):
+            continue
+
+        total_gpu_mem = sum(
+            node.node_profile.available_gpu_memory_bytes for node in cycle
+        )
+        if total_gpu_mem >= required_memory.in_bytes:
+            filtered_cycles.append(cast(list[NodeInfo], cycle))
+    return filtered_cycles
+
+
+def filter_cycles_by_cuda_capability(
+    cycles: list[list[NodeInfo]],
+) -> list[list[NodeInfo]]:
+    """Filter cycles to those where all nodes have CUDA GPUs.
+
+    This ensures that a cycle selected for CUDA instances actually has
+    NVIDIA GPUs available on all participating nodes.
+
+    Args:
+        cycles: List of node cycles to filter.
+
+    Returns:
+        Cycles where all nodes have at least one CUDA GPU.
+    """
+    filtered_cycles: list[list[NodeInfo]] = []
+    for cycle in cycles:
+        if not narrow_all_nodes(cycle):
+            continue
+
+        # All nodes must have at least one CUDA GPU
+        if all(node.node_profile.has_cuda_gpus for node in cycle):
+            filtered_cycles.append(cast(list[NodeInfo], cycle))
+    return filtered_cycles
+
+
+def filter_cycles_by_compute_capability(
+    cycles: list[list[NodeInfo]], min_compute_capability: str
+) -> list[list[NodeInfo]]:
+    """Filter cycles to those where all GPUs meet minimum compute capability.
+
+    Some models require specific CUDA compute capabilities (e.g., SM 8.0 for
+    efficient BFloat16 support). This filter ensures all GPUs in a cycle
+    meet the minimum requirement.
+
+    Args:
+        cycles: List of node cycles to filter.
+        min_compute_capability: Minimum compute capability (e.g., "8.0").
+
+    Returns:
+        Cycles where all GPUs have at least the minimum compute capability.
+    """
+    min_major, min_minor = _parse_compute_capability(min_compute_capability)
+    if min_major is None:
+        return cycles  # No filtering if we can't parse the requirement
+
+    filtered_cycles: list[list[NodeInfo]] = []
+    for cycle in cycles:
+        if not narrow_all_nodes(cycle):
+            continue
+
+        cycle_meets_requirement = True
+        for node in cycle:
+            for gpu in node.node_profile.gpu_profiles:
+                if gpu.compute_capability is None:
+                    cycle_meets_requirement = False
+                    break
+                gpu_major, gpu_minor = _parse_compute_capability(gpu.compute_capability)
+                if gpu_major is None:
+                    cycle_meets_requirement = False
+                    break
+                if (gpu_major, gpu_minor) < (min_major, min_minor):
+                    cycle_meets_requirement = False
+                    break
+            if not cycle_meets_requirement:
+                break
+
+        if cycle_meets_requirement:
+            filtered_cycles.append(cast(list[NodeInfo], cycle))
+    return filtered_cycles
+
+
+def _parse_compute_capability(cc: str) -> tuple[int | None, int | None]:
+    """Parse a compute capability string like '8.0' into (major, minor)."""
+    try:
+        parts = cc.split(".")
+        if len(parts) == 2:
+            return int(parts[0]), int(parts[1])
+    except (ValueError, AttributeError):
+        pass
+    return None, None
+
+
+def get_cuda_device_ids_for_cycle(cycle: list[NodeInfo]) -> dict[NodeId, list[int]]:
+    """Get the GPU device indices to use on each node in a cycle.
+
+    Returns a mapping from node ID to list of device indices (e.g., [0, 1]
+    for a node with 2 GPUs).
+
+    Args:
+        cycle: List of nodes in the selected cycle.
+
+    Returns:
+        Mapping from node ID to list of GPU device indices.
+    """
+    device_ids: dict[NodeId, list[int]] = {}
+    for node in cycle:
+        if node.node_profile is None:
+            device_ids[node.node_id] = []
+            continue
+
+        # Get indices of all CUDA GPUs on this node
+        cuda_indices = [
+            gpu.device_index
+            for gpu in node.node_profile.gpu_profiles
+            if gpu.accelerator_type.value == "nvidia_cuda"
+        ]
+        device_ids[node.node_id] = cuda_indices
+    return device_ids
+
+
+def rank_cycles_by_gpu_quality(
+    cycles: list[list[NodeInfo]],
+) -> list[list[NodeInfo]]:
+    """Rank cycles by GPU quality for optimal placement.
+
+    Cycles are sorted by:
+    1. Total available GPU memory (higher is better)
+    2. NVLink support (cycles with NVLink preferred)
+    3. Number of GPUs (more GPUs preferred for parallelism)
+
+    Args:
+        cycles: List of node cycles to rank.
+
+    Returns:
+        Cycles sorted by GPU quality (best first).
+    """
+
+    def score_cycle(cycle: list[NodeInfo]) -> tuple[int, int, int]:
+        total_gpu_mem = 0
+        nvlink_count = 0
+        gpu_count = 0
+
+        for node in cycle:
+            if node.node_profile is None:
+                continue
+            for gpu in node.node_profile.gpu_profiles:
+                total_gpu_mem += gpu.memory.free_bytes
+                if gpu.nvlink_supported:
+                    nvlink_count += 1
+                gpu_count += 1
+
+        return (total_gpu_mem, nvlink_count, gpu_count)
+
+    return sorted(cycles, key=score_cycle, reverse=True)
+
+
 def get_smallest_cycles(cycles: list[list[NodeInfo]]) -> list[list[NodeInfo]]:
     min_nodes = min(len(cycle) for cycle in cycles)
     return [cycle for cycle in cycles if len(cycle) == min_nodes]

@@ -3,11 +3,16 @@ from typing import Callable
 import pytest
 
 from exo.master.placement_utils import (
+    filter_cycles_by_compute_capability,
+    filter_cycles_by_cuda_capability,
+    filter_cycles_by_gpu_memory,
     filter_cycles_by_memory,
+    get_cuda_device_ids_for_cycle,
     get_hosts_from_subgraph,
     get_mlx_jaccl_coordinators,
     get_shard_assignments,
     get_smallest_cycles,
+    rank_cycles_by_gpu_quality,
 )
 from exo.shared.topology import Topology
 from exo.shared.types.common import Host, NodeId
@@ -397,3 +402,225 @@ def test_get_mlx_jaccl_coordinators(
     assert coordinators[node_c_id] == (
         f"{conn_c_a.send_back_multiaddr.ip_address}:5000"
     ), "node_c should use the IP from conn_c_a"
+
+
+# =============================================================================
+# GPU-Aware Placement Tests (Phase 7)
+# =============================================================================
+
+
+def test_filter_cycles_by_gpu_memory(
+    topology: Topology,
+    create_gpu_node: Callable[..., NodeInfo],
+    create_connection: Callable[[NodeId, NodeId], Connection],
+):
+    """Test filtering cycles by GPU memory."""
+    # arrange - create nodes with different GPU memory
+    node1_id = NodeId()
+    node2_id = NodeId()
+
+    # 16GB GPU memory each = 32GB total
+    node1 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node1_id,
+    )
+    node2 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node2_id,
+    )
+
+    topology.add_node(node1)
+    topology.add_node(node2)
+
+    connection1 = create_connection(node1_id, node2_id)
+    connection2 = create_connection(node2_id, node1_id)
+
+    topology.add_connection(connection1)
+    topology.add_connection(connection2)
+
+    cycles = topology.get_cycles()
+    assert len(cycles) == 1
+
+    # act - filter with memory requirement less than total GPU memory
+    filtered = filter_cycles_by_gpu_memory(cycles, Memory.from_gb(20))
+
+    # assert - cycle should pass
+    assert len(filtered) == 1
+
+    # act - filter with memory requirement more than total GPU memory
+    filtered = filter_cycles_by_gpu_memory(cycles, Memory.from_gb(40))
+
+    # assert - cycle should not pass
+    assert len(filtered) == 0
+
+
+def test_filter_cycles_by_cuda_capability(
+    topology: Topology,
+    create_gpu_node: Callable[..., NodeInfo],
+    create_node: Callable[[int, NodeId | None], NodeInfo],
+    create_connection: Callable[[NodeId, NodeId], Connection],
+):
+    """Test filtering cycles to only include those with CUDA GPUs."""
+    # arrange - one node with GPU, one without
+    node1_id = NodeId()
+    node2_id = NodeId()
+    node3_id = NodeId()
+
+    node1 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node1_id,
+    )
+    node2 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node2_id,
+    )
+    # node3 has no GPU (uses create_node which doesn't add GPU profiles)
+    node3 = create_node(64 * 1024**3, node3_id)
+
+    topology.add_node(node1)
+    topology.add_node(node2)
+    topology.add_node(node3)
+
+    # Create two cycles: (node1, node2) and (node1, node2, node3)
+    topology.add_connection(create_connection(node1_id, node2_id))
+    topology.add_connection(create_connection(node2_id, node1_id))
+    topology.add_connection(create_connection(node2_id, node3_id))
+    topology.add_connection(create_connection(node3_id, node1_id))
+
+    cycles = topology.get_cycles()
+
+    # act
+    filtered = filter_cycles_by_cuda_capability(cycles)
+
+    # assert - only cycles with all CUDA nodes should pass
+    assert len(filtered) == 1
+    assert len(filtered[0]) == 2  # The 2-node cycle with both GPU nodes
+
+
+def test_filter_cycles_by_compute_capability(
+    topology: Topology,
+    create_gpu_node: Callable[..., NodeInfo],
+    create_connection: Callable[[NodeId, NodeId], Connection],
+):
+    """Test filtering cycles by minimum compute capability."""
+    # arrange - nodes with different compute capabilities
+    node1_id = NodeId()
+    node2_id = NodeId()
+
+    node1 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node1_id,
+        compute_capability="8.0",  # Ampere
+    )
+    node2 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node2_id,
+        compute_capability="7.5",  # Turing
+    )
+
+    topology.add_node(node1)
+    topology.add_node(node2)
+
+    topology.add_connection(create_connection(node1_id, node2_id))
+    topology.add_connection(create_connection(node2_id, node1_id))
+
+    cycles = topology.get_cycles()
+    assert len(cycles) == 1
+
+    # act - require SM 7.0 (both nodes should pass)
+    filtered = filter_cycles_by_compute_capability(cycles, "7.0")
+    assert len(filtered) == 1
+
+    # act - require SM 8.0 (only node1 passes, but cycle needs all nodes)
+    filtered = filter_cycles_by_compute_capability(cycles, "8.0")
+    assert len(filtered) == 0
+
+
+def test_get_cuda_device_ids_for_cycle(
+    create_gpu_node: Callable[..., NodeInfo],
+):
+    """Test getting device IDs for nodes in a cycle."""
+    node1_id = NodeId()
+    node2_id = NodeId()
+
+    # Node with 2 GPUs
+    node1 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node1_id,
+        num_gpus=2,
+    )
+    # Node with 4 GPUs
+    node2 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=16 * 1024**3,
+        node_id=node2_id,
+        num_gpus=4,
+    )
+
+    cycle = [node1, node2]
+
+    # act
+    device_ids = get_cuda_device_ids_for_cycle(cycle)
+
+    # assert
+    assert device_ids[node1_id] == [0, 1]
+    assert device_ids[node2_id] == [0, 1, 2, 3]
+
+
+def test_rank_cycles_by_gpu_quality(
+    topology: Topology,
+    create_gpu_node: Callable[..., NodeInfo],
+    create_connection: Callable[[NodeId, NodeId], Connection],
+):
+    """Test ranking cycles by GPU quality (memory, NVLink)."""
+    # arrange - create two separate cycles with different GPU quality
+    node1_id = NodeId()
+    node2_id = NodeId()
+    node3_id = NodeId()
+    node4_id = NodeId()
+
+    # First cycle: lower memory, no NVLink
+    node1 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=8 * 1024**3,  # 8GB
+        node_id=node1_id,
+        nvlink_supported=False,
+    )
+    node2 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=8 * 1024**3,  # 8GB
+        node_id=node2_id,
+        nvlink_supported=False,
+    )
+
+    # Second cycle: higher memory, with NVLink
+    node3 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=24 * 1024**3,  # 24GB
+        node_id=node3_id,
+        nvlink_supported=True,
+    )
+    node4 = create_gpu_node(
+        ram_memory=64 * 1024**3,
+        gpu_memory=24 * 1024**3,  # 24GB
+        node_id=node4_id,
+        nvlink_supported=True,
+    )
+
+    # Create two separate 2-node cycles
+    cycles = [[node1, node2], [node3, node4]]
+
+    # act
+    ranked = rank_cycles_by_gpu_quality(cycles)
+
+    # assert - higher memory cycle should be first
+    assert len(ranked) == 2
+    # The cycle with 48GB total should come first
+    assert node3 in ranked[0] or node4 in ranked[0]

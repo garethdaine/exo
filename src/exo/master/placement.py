@@ -1,4 +1,5 @@
 import random
+import secrets
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Sequence
@@ -6,12 +7,16 @@ from typing import Sequence
 from loguru import logger
 
 from exo.master.placement_utils import (
+    filter_cycles_by_cuda_capability,
+    filter_cycles_by_gpu_memory,
     filter_cycles_by_memory,
+    get_cuda_device_ids_for_cycle,
     get_mlx_ibv_devices_matrix,
     get_mlx_jaccl_coordinators,
     get_mlx_ring_hosts_by_node,
     get_shard_assignments,
     get_smallest_cycles,
+    rank_cycles_by_gpu_quality,
 )
 from exo.shared.topology import Topology
 from exo.shared.types.commands import (
@@ -24,6 +29,8 @@ from exo.shared.types.memory import Memory
 from exo.shared.types.models import ModelId
 from exo.shared.types.topology import NodeInfo
 from exo.shared.types.worker.instances import (
+    CudaGlooInstance,
+    CudaNcclInstance,
     Instance,
     InstanceId,
     InstanceMeta,
@@ -36,6 +43,69 @@ from exo.shared.types.worker.shards import Sharding
 def random_ephemeral_port() -> int:
     port = random.randint(49153, 65535)
     return port - 1 if port <= 52415 else 52414
+
+
+def generate_nccl_unique_id() -> str:
+    """Generate a unique ID for NCCL communicator initialization.
+
+    NCCL requires a unique identifier to establish a communicator group.
+    This ID must be shared among all processes that will participate in
+    the collective operations.
+
+    The actual NCCL unique ID is typically 128 bytes (1024 bits), generated
+    by the rank-0 process using ncclGetUniqueId(). Here we generate a
+    placeholder that will be used to coordinate the actual ID generation
+    on the rank-0 worker.
+
+    Returns:
+        A hex-encoded 32-byte random string as placeholder for NCCL ID.
+    """
+    return secrets.token_hex(32)
+
+
+def get_cuda_master_addr(
+    selected_cycle: list[NodeInfo], cycle_digraph: Topology
+) -> str:
+    """Get the master address for CUDA distributed initialization.
+
+    The master address is an IP address of the rank-0 node that all other
+    nodes can reach. For NCCL/Gloo initialization, workers use this address
+    to coordinate communicator setup.
+
+    Args:
+        selected_cycle: List of nodes in the selected cycle (rank-0 is first).
+        cycle_digraph: Subgraph topology containing only the selected nodes.
+
+    Returns:
+        IP address string for the rank-0 node.
+    """
+    if not selected_cycle:
+        raise ValueError("Cannot get master address from empty cycle")
+
+    rank_0_node = selected_cycle[0]
+
+    # For single-node case, use localhost
+    if len(selected_cycle) == 1:
+        return "127.0.0.1"
+
+    # Find an IP address on rank-0 that other nodes can reach
+    # Look at connections from rank-1 to rank-0 to find a reachable IP
+    rank_1_node = selected_cycle[1]
+
+    for connection in cycle_digraph.list_connections():
+        if (
+            connection.local_node_id == rank_1_node.node_id
+            and connection.send_back_node_id == rank_0_node.node_id
+        ):
+            return connection.send_back_multiaddr.ip_address
+
+    # Fallback: use first network interface on rank-0
+    if rank_0_node.node_profile and rank_0_node.node_profile.network_interfaces:
+        return rank_0_node.node_profile.network_interfaces[0].ip_address
+
+    raise ValueError(
+        f"Cannot determine master address for rank-0 node {rank_0_node.node_id}"
+    )
 
 
 def add_instance_to_placements(
@@ -61,11 +131,55 @@ def place_instance(
     candidate_cycles = list(
         filter(lambda it: len(it) >= command.min_nodes, cycles + singleton_cycles)
     )
-    cycles_with_sufficient_memory = filter_cycles_by_memory(
-        candidate_cycles, command.model_meta.storage_size
+
+    # Check if this is a CUDA instance request
+    is_cuda_instance = command.instance_meta in (
+        InstanceMeta.CudaNccl,
+        InstanceMeta.CudaGloo,
     )
-    if not cycles_with_sufficient_memory:
-        raise ValueError("No cycles found with sufficient memory")
+
+    if is_cuda_instance:
+        # For CUDA instances, filter by GPU memory and CUDA capability
+        logger.info("CUDA instance requested - applying GPU-aware filtering")
+
+        # First, filter to cycles that have CUDA GPUs
+        cycles_with_cuda = filter_cycles_by_cuda_capability(candidate_cycles)
+        if not cycles_with_cuda:
+            raise ValueError(
+                "No cycles found with CUDA-capable GPUs. "
+                "CUDA instances require NVIDIA GPUs on all participating nodes."
+            )
+
+        # Filter by GPU memory (model must fit in GPU VRAM)
+        cycles_with_sufficient_memory = filter_cycles_by_gpu_memory(
+            cycles_with_cuda, command.model_meta.storage_size
+        )
+        if not cycles_with_sufficient_memory:
+            # Fall back to RAM-based filtering if no cycles have enough GPU memory
+            # This allows placement on systems where model offloading might be used
+            logger.warning(
+                "No cycles with sufficient GPU memory, falling back to RAM filtering"
+            )
+            cycles_with_sufficient_memory = filter_cycles_by_memory(
+                cycles_with_cuda, command.model_meta.storage_size
+            )
+
+        if not cycles_with_sufficient_memory:
+            raise ValueError(
+                "No CUDA-capable cycles found with sufficient memory for model"
+            )
+
+        # Rank by GPU quality (memory, NVLink support)
+        cycles_with_sufficient_memory = rank_cycles_by_gpu_quality(
+            cycles_with_sufficient_memory
+        )
+    else:
+        # For non-CUDA instances (MLX, etc.), use RAM-based filtering
+        cycles_with_sufficient_memory = filter_cycles_by_memory(
+            candidate_cycles, command.model_meta.storage_size
+        )
+        if not cycles_with_sufficient_memory:
+            raise ValueError("No cycles found with sufficient memory")
 
     if command.sharding == Sharding.Tensor:
         if not command.model_meta.supports_tensor:
@@ -167,17 +281,66 @@ def place_instance(
             )
 
         case InstanceMeta.CudaNccl:
-            # TODO: Implement CUDA NCCL instance placement (Phase 3)
-            raise NotImplementedError(
-                "CUDA NCCL instance placement is not yet implemented. "
-                "This will be added in Phase 3: CUDA Backend Implementation."
+            # Get device IDs for each node in the cycle
+            device_ids_by_node = get_cuda_device_ids_for_cycle(selected_cycle)
+
+            # For now, use first GPU on each node (device 0)
+            # Future: support multi-GPU per node with tensor parallelism
+            device_ids = [
+                device_ids_by_node.get(node.node_id, [0])[0]
+                if device_ids_by_node.get(node.node_id)
+                else 0
+                for node in selected_cycle
+            ]
+
+            # Get master address and port for NCCL initialization
+            master_addr = get_cuda_master_addr(selected_cycle, cycle_digraph)
+            master_port = random_ephemeral_port()
+
+            # Generate NCCL unique ID for communicator setup
+            nccl_unique_id = generate_nccl_unique_id()
+
+            logger.info(
+                f"Creating CUDA NCCL instance with {len(selected_cycle)} nodes, "
+                f"master={master_addr}:{master_port}"
+            )
+
+            target_instances[instance_id] = CudaNcclInstance(
+                instance_id=instance_id,
+                shard_assignments=shard_assignments,
+                nccl_unique_id=nccl_unique_id,
+                device_ids=device_ids,
+                master_addr=master_addr,
+                master_port=master_port,
             )
 
         case InstanceMeta.CudaGloo:
-            # TODO: Implement CUDA Gloo instance placement (Phase 3)
-            raise NotImplementedError(
-                "CUDA Gloo instance placement is not yet implemented. "
-                "This will be added in Phase 3: CUDA Backend Implementation."
+            # Get device IDs for each node in the cycle
+            device_ids_by_node = get_cuda_device_ids_for_cycle(selected_cycle)
+
+            # For now, use first GPU on each node (device 0)
+            device_ids = [
+                device_ids_by_node.get(node.node_id, [0])[0]
+                if device_ids_by_node.get(node.node_id)
+                else 0
+                for node in selected_cycle
+            ]
+
+            # Get master address and port for Gloo initialization
+            master_addr = get_cuda_master_addr(selected_cycle, cycle_digraph)
+            master_port = random_ephemeral_port()
+
+            logger.info(
+                f"Creating CUDA Gloo instance with {len(selected_cycle)} nodes, "
+                f"master={master_addr}:{master_port}"
+            )
+
+            target_instances[instance_id] = CudaGlooInstance(
+                instance_id=instance_id,
+                shard_assignments=shard_assignments,
+                master_addr=master_addr,
+                master_port=master_port,
+                device_ids=device_ids,
             )
 
         case InstanceMeta.VulkanCompute:
