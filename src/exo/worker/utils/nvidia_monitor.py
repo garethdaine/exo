@@ -224,18 +224,41 @@ def detect_nvidia_gpus() -> list[NvidiaGpuInfo]:
             if isinstance(pci_bus_id, bytes):
                 pci_bus_id = pci_bus_id.decode("utf-8")
 
-            memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            # Get memory info - some GPUs (e.g., GB10 on DGX Spark) use unified memory
+            # and don't support per-GPU memory queries
+            memory_total_bytes = 0
+            try:
+                memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                memory_total_bytes = memory_info.total
+            except pynvml.NVMLError:
+                # Unified memory system - fall back to system memory
+                try:
+                    import psutil
 
-            # Get compute capability
-            major, minor = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
+                    memory_total_bytes = psutil.virtual_memory().total
+                    logger.debug(
+                        f"GPU {i} uses unified memory, using system RAM: "
+                        f"{memory_total_bytes / (1024**3):.1f} GB"
+                    )
+                except ImportError:
+                    logger.warning(f"GPU {i}: Cannot determine memory (psutil not available)")
+
+            # Get compute capability - may not be available on all GPUs
+            major, minor = 0, 0
+            try:
+                major, minor = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
+            except (pynvml.NVMLError, AttributeError):
+                # Some drivers don't expose this API
+                logger.debug(f"GPU {i}: Compute capability not available")
 
             # Check for NVLink support
             nvlink_supported = False
             try:
                 # NVLink is present if we can query link state for link 0
-                pynvml.nvmlDeviceGetNvLinkState(handle, 0)
-                nvlink_supported = True
-            except pynvml.NVMLError:
+                if hasattr(pynvml, "nvmlDeviceGetNvLinkState"):
+                    pynvml.nvmlDeviceGetNvLinkState(handle, 0)
+                    nvlink_supported = True
+            except (pynvml.NVMLError, AttributeError):
                 pass
 
             # Check for multi-GPU board
@@ -251,8 +274,8 @@ def detect_nvidia_gpus() -> list[NvidiaGpuInfo]:
                     name=name,
                     uuid=uuid,
                     pci_bus_id=pci_bus_id,
-                    memory_total_bytes=memory_info.total,
-                    memory_total_mb=memory_info.total // (1024 * 1024),
+                    memory_total_bytes=memory_total_bytes,
+                    memory_total_mb=memory_total_bytes // (1024 * 1024),
                     compute_capability=(major, minor),
                     driver_version=driver_version,
                     cuda_version=cuda_version,
@@ -305,15 +328,44 @@ def get_nvidia_metrics() -> NvidiaMetrics:
                 name = name.decode("utf-8")
 
             # Get utilization rates
-            utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            utilization_gpu = 0.0
+            utilization_memory = 0.0
+            try:
+                utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                utilization_gpu = float(utilization.gpu)
+                utilization_memory = float(utilization.memory)
+            except pynvml.NVMLError:
+                pass
 
-            # Get memory info
-            memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            # Get memory info - handle unified memory systems
+            memory_used_bytes = 0
+            memory_free_bytes = 0
+            memory_total_bytes = 0
+            try:
+                memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                memory_used_bytes = memory_info.used
+                memory_free_bytes = memory_info.free
+                memory_total_bytes = memory_info.total
+            except pynvml.NVMLError:
+                # Unified memory system - use system memory stats
+                try:
+                    import psutil
+
+                    vm = psutil.virtual_memory()
+                    memory_total_bytes = vm.total
+                    memory_used_bytes = vm.total - vm.available
+                    memory_free_bytes = vm.available
+                except ImportError:
+                    pass
 
             # Get temperature
-            temperature = pynvml.nvmlDeviceGetTemperature(
-                handle, pynvml.NVML_TEMPERATURE_GPU
-            )
+            temperature = 0.0
+            try:
+                temperature = float(
+                    pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+                )
+            except pynvml.NVMLError:
+                pass
 
             # Get power usage
             power_draw = 0.0
@@ -365,12 +417,12 @@ def get_nvidia_metrics() -> NvidiaMetrics:
                 NvidiaGpuMetrics(
                     index=i,
                     name=name,
-                    utilization_gpu=float(utilization.gpu),
-                    utilization_memory=float(utilization.memory),
-                    memory_used_bytes=memory_info.used,
-                    memory_free_bytes=memory_info.free,
-                    memory_total_bytes=memory_info.total,
-                    temperature_c=float(temperature),
+                    utilization_gpu=utilization_gpu,
+                    utilization_memory=utilization_memory,
+                    memory_used_bytes=memory_used_bytes,
+                    memory_free_bytes=memory_free_bytes,
+                    memory_total_bytes=memory_total_bytes,
+                    temperature_c=temperature,
                     power_draw_watts=power_draw,
                     power_limit_watts=power_limit,
                     clock_graphics_mhz=clock_graphics,
