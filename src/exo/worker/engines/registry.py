@@ -192,9 +192,10 @@ def get_default_engine_for_platform() -> str:
     )
 
 
-# Auto-register MLX engine on macOS
+# Auto-register engines based on platform availability
 def _register_default_engines() -> None:
     """Register default engines based on platform availability."""
+    # Register MLX engine on macOS
     if sys.platform == "darwin":
         try:
             from exo.worker.engines.mlx.engine import MlxEngine
@@ -203,7 +204,19 @@ def _register_default_engines() -> None:
         except ImportError:
             pass  # MLX not available
 
-    # Future: Register CUDA engine on Linux/Windows
+    # Register CUDA engine on Linux/Windows
+    if sys.platform in ("linux", "win32"):  # type: ignore[comparison-overlap]
+        try:
+            # Check if CUDA is actually available before registering
+            import torch  # pyright: ignore[reportMissingImports]
+
+            if torch.cuda.is_available():  # pyright: ignore[reportUnknownMemberType]
+                from exo.worker.engines.cuda.engine import CudaEngine
+
+                register_engine_factory("cuda", CudaEngine)
+        except ImportError:
+            pass  # PyTorch not available
+
     # Future: Register Vulkan engine for cross-platform GPU support
 
 
