@@ -1,10 +1,11 @@
 # Check tasks are complete before runner is ever ready.
 from collections.abc import Iterable
 from typing import Callable
+from unittest.mock import MagicMock
 
 import pytest
 
-import exo.worker.runner.runner as mlx_runner
+import exo.worker.runner.runner as runner_module
 from exo.shared.types.api import ChatCompletionMessage
 from exo.shared.types.chunks import TokenChunk
 from exo.shared.types.events import (
@@ -107,18 +108,46 @@ def assert_events_equal(test_events: Iterable[Event], true_events: Iterable[Even
         assert test_event == true_event, f"{test_event} != {true_event}"
 
 
-@pytest.fixture
-def patch_out_mlx(monkeypatch: pytest.MonkeyPatch):
-    # initialize_mlx returns a "group" equal to 1
-    monkeypatch.setattr(mlx_runner, "initialize_mlx", make_nothin(1))
-    monkeypatch.setattr(mlx_runner, "load_mlx_items", make_nothin((1, 1)))
-    monkeypatch.setattr(mlx_runner, "warmup_inference", make_nothin(1))
-    monkeypatch.setattr(mlx_runner, "_check_for_debug_prompts", nothin)
+def _create_mock_engine():
+    """Create a mock InferenceEngine for testing."""
+    mock_engine = MagicMock()
 
+    # Mock distributed group
+    mock_group = MagicMock()
+    mock_group.rank.return_value = 0
+    mock_group.size.return_value = 1
+    mock_engine.initialize_distributed.return_value = mock_group
+
+    # Mock load_model - return (model, tokenizer)
+    mock_engine.load_model.return_value = (MagicMock(), MagicMock())
+
+    # Mock warmup
+    mock_engine.warmup.return_value = 1
+
+    # Mock generate - yield a generation response
     def fake_generate(*_1: object, **_2: object):
         yield GenerationResponse(token=0, text="hi", finish_reason="stop")
 
-    monkeypatch.setattr(mlx_runner, "mlx_generate", fake_generate)
+    mock_engine.generate.side_effect = fake_generate
+
+    # Mock cleanup
+    mock_engine.cleanup.return_value = None
+
+    return mock_engine
+
+
+@pytest.fixture
+def patch_out_engine(monkeypatch: pytest.MonkeyPatch):
+    """Patch out the engine selection to use a mock engine."""
+    mock_engine = _create_mock_engine()
+
+    # Patch _get_engine_for_instance to return our mock
+    monkeypatch.setattr(
+        runner_module, "_get_engine_for_instance", make_nothin(mock_engine)
+    )
+
+    # Patch _check_for_debug_prompts to do nothing
+    monkeypatch.setattr(runner_module, "_check_for_debug_prompts", nothin)
 
 
 def _run(tasks: Iterable[Task]):
@@ -143,12 +172,12 @@ def _run(tasks: Iterable[Task]):
         task_receiver.close = nothin
         task_receiver.join = nothin
 
-        mlx_runner.main(bound_instance, event_sender, task_receiver)
+        runner_module.main(bound_instance, event_sender, task_receiver)
 
         return event_receiver.collect()
 
 
-def test_events_processed_in_correct_order(patch_out_mlx: pytest.MonkeyPatch):
+def test_events_processed_in_correct_order(patch_out_engine: pytest.MonkeyPatch):
     events = _run([INIT_TASK, LOAD_TASK, WARMUP_TASK, CHAT_TASK, SHUTDOWN_TASK])
 
     expected_chunk = ChunkGenerated(

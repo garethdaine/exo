@@ -414,3 +414,38 @@ def get_engine_for_shard_metadata(shard_metadata: ShardMetadata) -> str:
     # - Model requirements (some models may only work with certain engines)
     _ = shard_metadata  # Suppress unused variable warning
     return "mlx"
+
+
+def get_engine_name_for_instance(instance: object) -> str:
+    """
+    Determine the appropriate engine name based on instance type.
+
+    This function examines the instance type and returns the engine name
+    that should be used for inference.
+
+    Args:
+        instance: The instance object (MlxRingInstance, CudaNcclInstance, etc.).
+
+    Returns:
+        The engine name string ("mlx", "cuda", or "vulkan").
+
+    Raises:
+        ValueError: If the instance type is not recognized.
+    """
+    # Import here to avoid circular imports
+    from exo.shared.types.worker.instances import (
+        CudaGlooInstance,
+        CudaNcclInstance,
+        MlxJacclInstance,
+        MlxRingInstance,
+        VulkanComputeInstance,
+    )
+
+    if isinstance(instance, (MlxRingInstance, MlxJacclInstance)):
+        return "mlx"
+    elif isinstance(instance, (CudaNcclInstance, CudaGlooInstance)):
+        return "cuda"
+    elif isinstance(instance, VulkanComputeInstance):
+        return "vulkan"
+    else:
+        raise ValueError(f"Unknown instance type: {type(instance).__name__}")

@@ -28,6 +28,7 @@ from exo.worker.engines.base import (
     TimeoutCallback,
     Tokenizer,
     get_engine_for_shard_metadata,
+    get_engine_name_for_instance,
 )
 from exo.worker.engines.registry import (
     EngineNotAvailableError,
@@ -59,6 +60,7 @@ __all__ = [
     "TimeoutCallback",
     "Tokenizer",
     "get_engine_for_shard_metadata",
+    "get_engine_name_for_instance",
     # Registry
     "EngineNotAvailableError",
     "EngineNotFoundError",

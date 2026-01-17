@@ -12,6 +12,7 @@ Phases tested:
 - Phase 3: CUDA/MLX engine implementation
 - Phase 4: Model sharding (if applicable)
 - Phase 5: Hardware detection and monitoring
+- Phase 6: Runner engine selection
 
 Usage:
     python scripts/test_all_phases.py
@@ -462,6 +463,123 @@ async def test_phase5_hardware_detection() -> bool:
     return all_passed
 
 
+def test_phase6_runner_engine_selection() -> bool:
+    """Test Phase 6: Runner engine selection."""
+    print_header("Phase 6: Runner Engine Selection")
+    all_passed = True
+
+    print_subheader("6.1 Engine Selection Functions")
+    try:
+        from exo.worker.engines import get_engine_name_for_instance
+
+        print_result("get_engine_name_for_instance exists", True)
+
+        # Test engine name selection for each instance type
+        from exo.shared.types.worker.instances import (
+            CudaGlooInstance,
+            CudaNcclInstance,
+            MlxJacclInstance,
+            MlxRingInstance,
+            VulkanComputeInstance,
+        )
+
+        # Create minimal mock instances to test engine selection
+        # We can't instantiate these directly but we can test the function exists
+        print_result("Instance types available for selection", True)
+
+    except ImportError as e:
+        print_result("Engine selection imports", False, str(e))
+        all_passed = False
+
+    print_subheader("6.2 Runner Module")
+    try:
+        from exo.worker.runner.runner import (
+            _get_engine_for_instance,
+            _requires_distributed_init,
+            main,
+        )
+
+        print_result("Runner main function exists", True)
+        print_result("_get_engine_for_instance helper exists", True)
+        print_result("_requires_distributed_init helper exists", True)
+
+    except ImportError as e:
+        print_result("Runner module import", False, str(e))
+        all_passed = False
+
+    print_subheader("6.3 Engine Registry Integration")
+    try:
+        from exo.worker.engines import (
+            EngineNotAvailableError,
+            EngineNotFoundError,
+            get_engine,
+            list_available_engines,
+        )
+
+        available = list_available_engines()
+        print_result(f"Available engines: {available}", True)
+
+        # Test that appropriate engine is available for this platform
+        if sys.platform == "darwin":
+            try:
+                engine = get_engine("mlx")
+                print_result("MLX engine instantiated", True)
+
+                # Verify it has required methods
+                required_methods = ["initialize_distributed", "load_model", "warmup", "generate", "cleanup"]
+                for method in required_methods:
+                    has_method = hasattr(engine, method)
+                    print_result(f"  MLX engine.{method}", has_method)
+                    all_passed = all_passed and has_method
+
+            except (EngineNotFoundError, EngineNotAvailableError) as e:
+                print_result("MLX engine", False, str(e))
+                all_passed = False
+        else:
+            # On Linux/Windows, CUDA engine might not be available if PyTorch not installed
+            try:
+                engine = get_engine("cuda")
+                print_result("CUDA engine instantiated", True)
+
+                required_methods = ["initialize_distributed", "load_model", "warmup", "generate", "cleanup"]
+                for method in required_methods:
+                    has_method = hasattr(engine, method)
+                    print_result(f"  CUDA engine.{method}", has_method)
+                    all_passed = all_passed and has_method
+
+            except (EngineNotFoundError, EngineNotAvailableError) as e:
+                print_result("CUDA engine", True, f"not available: {e} (expected without PyTorch)")
+
+    except ImportError as e:
+        print_result("Engine registry", False, str(e))
+        all_passed = False
+
+    print_subheader("6.4 Error Handling")
+    try:
+        from exo.worker.engines import (
+            EngineNotAvailableError,
+            EngineNotFoundError,
+            get_engine,
+        )
+
+        # Test that non-existent engine raises appropriate error
+        try:
+            get_engine("nonexistent_engine")
+            print_result("EngineNotFoundError raised", False, "exception not raised")
+            all_passed = False
+        except EngineNotFoundError:
+            print_result("EngineNotFoundError raised for unknown engine", True)
+        except Exception as e:
+            print_result("EngineNotFoundError raised", False, f"wrong exception: {type(e).__name__}")
+            all_passed = False
+
+    except ImportError as e:
+        print_result("Error handling", False, str(e))
+        all_passed = False
+
+    return all_passed
+
+
 def test_type_checker_compliance() -> bool:
     """Test that all modules pass type checking."""
     print_header("Type Checker Compliance")
@@ -477,6 +595,7 @@ def test_type_checker_compliance() -> bool:
         "exo.worker.engines.serialization",
         "exo.shared.types.profiling",
         "exo.worker.utils.platform_detection",
+        "exo.worker.runner.runner",
     ]
 
     if sys.platform == "darwin":
@@ -532,6 +651,7 @@ async def main() -> int:
     results["Phase 3: CUDA/MLX Engine"] = test_phase3_cuda_engine()
     results["Phase 4: Model Sharding"] = test_phase4_model_sharding()
     results["Phase 5: Hardware Detection"] = await test_phase5_hardware_detection()
+    results["Phase 6: Runner Engine Selection"] = test_phase6_runner_engine_selection()
     results["Type Checker Compliance"] = test_type_checker_compliance()
 
     # Summary
